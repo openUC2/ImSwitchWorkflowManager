@@ -2,6 +2,7 @@ from typing import Callable, List, Dict, Any, Optional
 import threading
 import json
 import traceback
+import numpy as np
 
 class WorkflowContext:
     def __init__(self):
@@ -9,6 +10,17 @@ class WorkflowContext:
         self.should_stop = False
         self.current_step_index = 0
         self.event_listeners: Dict[str, List[Callable[[Dict[str, Any]], None]]] = {}
+        self.objects: Dict[str, Any] = {}  # Storage for arbitrary objects
+    
+    def set_object(self, key: str, obj: Any):
+        self.objects[key] = obj
+    
+    def get_object(self, key: str) -> Any:
+        return self.objects.get(key)
+    
+    def remove_object(self, key: str):
+        if key in self.objects:
+            del self.objects[key]
 
     def store_step_result(self, step_id: str, metadata: Dict[str, Any]):
         self.data[step_id] = metadata
@@ -30,6 +42,7 @@ class WorkflowContext:
 
     def request_stop(self):
         self.should_stop = True
+
 
 class WorkflowStep:
     def __init__(
@@ -159,7 +172,8 @@ def set_laser_power(power: float, channel: str):
 
 def acquire_frame(channel: str):
     print(f"Acquiring frame on channel {channel}")
-    return channel
+    frame = np.random.rand(512, 512)
+    return frame
 
 def process_data(context: WorkflowContext, metadata: Dict[str, Any]):
     print(f"Processing data for step {metadata['step_id']}...")
@@ -173,6 +187,15 @@ def wait_time(seconds: int, context: WorkflowContext, metadata: Dict[str, Any]):
     import time
     time.sleep(seconds)
     metadata["waited"] = seconds
+    
+def addFrametoFile(frame:np.ndarray, context: WorkflowContext, metadata: Dict[str, Any]):
+    print(f"Adding frame to file for step {metadata['step_id']}...")
+    metadata["frame_added"] = True
+    
+def append_data(context: WorkflowContext, metadata: Dict[str, Any]):
+    obj = context.get_object("data_buffer")
+    if obj is not None:
+        obj.append(metadata["result"])
 
 # Example: Dynamically generate a workflow
 x_positions = [0, 10]
@@ -181,6 +204,8 @@ z_positions = [0, 5]
 channels = ["Brightfield", "GFP"]
 frames = range(2)
 workflowSteps = []
+
+mFile = []
 
 for x in x_positions:
     for y in y_positions:
@@ -220,7 +245,7 @@ for x in x_positions:
                         main_params={"channel": ch},
                         pre_funcs=[wait_time],
                         pre_params={"seconds": 1},
-                        post_funcs=[process_data, save_frame]
+                        post_funcs=[process_data, save_frame, append_data]
                     ))
 
 # Example event listener: print progress events
@@ -231,10 +256,14 @@ wf = Workflow(workflowSteps)
 context = WorkflowContext()
 context.on("progress", progress_listener)
 
+# Set a generic object (like a list) into context
+context.set_object("data_buffer", [])
+
 # Running normally
 context = wf.run(context)
 print("Workflow results:", context.data)
 
+all_frames = context.get_object("data_buffer")
 # Example: If we wanted to stop the workflow halfway:
 # context.request_stop()
 
